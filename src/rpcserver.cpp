@@ -283,10 +283,10 @@ Value stop(const Array& params, bool fHelp)
     if (fHelp || params.size() > 1)
         throw runtime_error(
             "stop\n"
-            "\nStop Gcoin server.");
+            "\nStop Bitcoin server.");
     // Shutdown will take long enough that the response should get back
     StartShutdown();
-    return "Gcoin server stopping";
+    return "Bitcoin server stopping";
 }
 
 
@@ -392,8 +392,8 @@ static const CRPCCommand vRPCCommands[] =
     { "wallet",             "sendorder",                   &sendorder,                   false,     false,      true },
     { "wallet",             "cancelorder",                 &cancelorder,                 false,     false,      true },
     { "wallet",             "match",                       &match,                       false,     false,      true },
-    { "wallet",             "getlicenselist",              &getlicenselist,              false,     false,      true },
     { "wallet",             "getlicenseinfo",              &getlicenseinfo,              false,     false,      true },
+    { "wallet",             "getassetinfo",                &getassetinfo,                false,     false,      true },
 
     { "wallet",             "addmultisigaddress",          &addmultisigaddress,          true,      false,      true },
     { "wallet",             "backupwallet",                &backupwallet,                true,      false,      true },
@@ -658,29 +658,38 @@ void StartRPCThreads()
         strAllowed += subnet.ToString() + " ";
     LogPrint("rpc", "Allowing RPC connections from: %s\n", strAllowed);
 
-    strRPCUserColonPass = mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"];
-    if (((mapArgs["-rpcpassword"] == "") ||
-         (mapArgs["-rpcuser"] == mapArgs["-rpcpassword"])) && Params().RequireRPCPassword())
+    //strRPCUserColonPass = mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"];
+    if ((mapArgs["-rpcpassword"] == ""))
     {
-        unsigned char rand_pwd[32];
+/*        unsigned char rand_pwd[32];
         GetRandBytes(rand_pwd, 32);
         uiInterface.ThreadSafeMessageBox(strprintf(
-            _("To use gcoind, or the -server option to gcoin-qt, you must set an rpcpassword in the configuration file:\n"
+            _("To use bitcoind, or the -server option to bitcoin-qt, you must set an rpcpassword in the configuration file:\n"
               "%s\n"
               "It is recommended you use the following random password:\n"
-              "rpcuser=gcoinrpc\n"
+              "rpcuser=bitcoinrpc\n"
               "rpcpassword=%s\n"
               "(you do not need to remember this password)\n"
               "The username and password MUST NOT be the same.\n"
               "If the file does not exist, create it with owner-readable-only file permissions.\n"
               "It is also recommended to set alertnotify so you are notified of problems;\n"
-              "for example: alertnotify=echo %%s | mail -s \"Gcoin Alert\" admin@foo.com\n"),
+              "for example: alertnotify=echo %%s | mail -s \"Bitcoin Alert\" admin@foo.com\n"),
                 GetConfigFile().string(),
                 EncodeBase58(&rand_pwd[0],&rand_pwd[0]+32)),
                 "", CClientUIInterface::MSG_ERROR | CClientUIInterface::SECURE);
         StartShutdown();
-        return;
-    }
+        return;*/
+         LogPrintf("No rpcpassword set - using random cookie authentication\n");
+         if (!GenerateAuthCookie(&strRPCUserColonPass)) {
+             uiInterface.ThreadSafeMessageBox(
+                 _("Error: A fatal internal error occured, see debug.log for details"), // Same message as AbortNode
+                 "", CClientUIInterface::MSG_ERROR);
+             StartShutdown();
+             return;
+         }
+     } else {
+         strRPCUserColonPass = mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"];
+     }
 
     assert(rpc_io_service == NULL);
     rpc_io_service = new boost::asio::io_service();
@@ -829,6 +838,8 @@ void StopRPCThreads()
             LogPrintf("%s: Warning: %s when cancelling timer", __func__, ec.message());
     }
     deadlineTimers.clear();
+
+    DeleteAuthCookie();
 
     rpc_io_service->stop();
     g_rpcSignals.Stopped();
@@ -1091,7 +1102,7 @@ json_spirit::Value CRPCTable::execute(const std::string &strMethod, const json_s
 }
 
 std::string HelpExampleCli(string methodname, string args){
-    return "> gcoin-cli " + methodname + " " + args + "\n";
+    return "> bitcoin-cli " + methodname + " " + args + "\n";
 }
 
 std::string HelpExampleRpc(string methodname, string args){

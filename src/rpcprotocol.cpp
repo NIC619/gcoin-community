@@ -7,6 +7,7 @@
 #include "rpcprotocol.h"
 
 #include "clientversion.h"
+#include "random.h"
 #include "tinyformat.h"
 #include "util.h"
 #include "utilstrencodings.h"
@@ -14,6 +15,7 @@
 #include "version.h"
 
 #include <stdint.h>
+#include <fstream>
 #include <string.h>
 
 #include <sstream>
@@ -52,7 +54,7 @@ std::string HTTPPost(const std::string& strMsg, const std::map<std::string, std:
 {
     std::ostringstream s;
     s << "POST / HTTP/1.1\r\n"
-      << "User-Agent: gcoin-json-rpc/" << FormatFullVersion() << "\r\n"
+      << "User-Agent: bitcoin-json-rpc/" << FormatFullVersion() << "\r\n"
       << "Host: 127.0.0.1\r\n"
       << "Content-Type: application/json\r\n"
       << "Content-Length: " << strMsg.size() << "\r\n"
@@ -87,7 +89,7 @@ std::string HTTPError(int nStatus, bool keepalive, bool headersOnly)
     if (nStatus == HTTP_UNAUTHORIZED)
         return strprintf("HTTP/1.0 401 Authorization Required\r\n"
             "Date: %s\r\n"
-            "Server: gcoin-json-rpc/%s\r\n"
+            "Server: bitcoin-json-rpc/%s\r\n"
             "WWW-Authenticate: Basic realm=\"jsonrpc\"\r\n"
             "Content-Type: text/html\r\n"
             "Content-Length: 296\r\n"
@@ -114,7 +116,7 @@ std::string HTTPReplyHeader(int nStatus, bool keepalive, size_t contentLength, c
             "Connection: %s\r\n"
             "Content-Length: %u\r\n"
             "Content-Type: %s\r\n"
-            "Server: gcoin-json-rpc/%s\r\n"
+            "Server: bitcoin-json-rpc/%s\r\n"
             "\r\n",
         nStatus,
         httpStatusDescription(nStatus),
@@ -250,7 +252,7 @@ int ReadHTTPMessage(std::basic_istream<char>& stream, std::map<std::string,
 }
 
 /**
- * JSON-RPC protocol.  Gcoin speaks version 1.0 for maximum compatibility,
+ * JSON-RPC protocol.  Bitcoin speaks version 1.0 for maximum compatibility,
  * but uses JSON-RPC 1.1/2.0 standards for parts of the 1.0 standard that were
  * unspecified (HTTP errors and contents of 'error').
  * 
@@ -293,3 +295,68 @@ Object JSONRPCError(int code, const std::string& message)
     error.push_back(Pair("message", message));
     return error;
 }
+
+/** Username used when cookie authentication is in use (arbitrary, only for
+* recognizability in debugging/logging purposes)
+*/
+static const std::string COOKIEAUTH_USER = "__cookie__";
+/** Default name for auth cookie file */
+static const std::string COOKIEAUTH_FILE = ".cookie";
+
+boost::filesystem::path GetAuthCookieFile()
+{
+	boost::filesystem::path path(GetArg("-rpccookiefile", COOKIEAUTH_FILE));
+	if (!path.is_complete()) path = GetDataDir() / path;
+	return path;
+}
+
+bool GenerateAuthCookie(std::string *cookie_out)
+{
+	unsigned char rand_pwd[32];
+     GetRandBytes(rand_pwd, 32);
+     std::string cookie = COOKIEAUTH_USER + ":" + EncodeBase64(&rand_pwd[0],32);
+ 
+     /** the umask determines what permissions are used to create this file -
+      * these are set to 077 in init.cpp unless overridden with -sysperms.
+      */
+     std::ofstream file;
+     boost::filesystem::path filepath = GetAuthCookieFile();
+     file.open(filepath.string().c_str());
+     if (!file.is_open()) {
+         LogPrintf("Unable to open cookie authentication file %s for writing\n", filepath.string());
+         return false;
+     }
+     file << cookie;
+     file.close();
+     LogPrintf("Generated RPC authentication cookie %s\n", filepath.string());
+ 
+     if (cookie_out)
+         *cookie_out = cookie;
+     return true;
+ }
+ 
+ bool GetAuthCookie(std::string *cookie_out)
+ {
+     std::ifstream file;
+     std::string cookie;
+     boost::filesystem::path filepath = GetAuthCookieFile();
+     file.open(filepath.string().c_str());
+     if (!file.is_open())
+         return false;
+     std::getline(file, cookie);
+     file.close();
+ 
+     if (cookie_out)
+         *cookie_out = cookie;
+     return true;
+ }
+ 
+ void DeleteAuthCookie()
+ {
+     try {
+         boost::filesystem::remove(GetAuthCookieFile());
+     } catch (const boost::filesystem::filesystem_error& e) {
+         LogPrintf("%s: Unable to remove random auth cookie file: %s\n", __func__, e.what());
+     }
+ }
+ 
